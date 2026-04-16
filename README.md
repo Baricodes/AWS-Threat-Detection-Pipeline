@@ -16,16 +16,9 @@ This project is a fully serverless, event-driven threat detection pipeline built
 
 ## 🏗️ Architecture
 
-```
-CloudTrail → CloudWatch Logs → Lambda Trigger
-                                      ↓
-                           Step Functions Orchestrator
-                           ├── AnalyzeThreat      (Bedrock/Claude Haiku)
-                           ├── WriteThreatRecord  (DynamoDB)
-                           └── SendEmailAlert     (SES)
-                                      ↓
-                        DynamoDB (Threat Records) + SES (HTML Alerts)
-```
+High-level flow: **CloudTrail** captures API activity, archives to **S3**, and streams to **CloudWatch Logs**. A **subscription filter** invokes **threat-log-enricher** for high-risk events, which starts **Step Functions**. A **Map** state (max concurrency 5) runs **threat-bedrock-analyzer** (Bedrock / Claude Haiku), **threat-record-writer** (DynamoDB, 90-day TTL), and **threat-email-alerter** (SES for scores ≥ 7). **IAM** supplies least-privilege roles for Lambda and Step Functions.
+
+![AI-Powered Cloud Threat Detection Pipeline — architecture diagram](images/architecture-diagram.png)
 
 ### Services Used
 
@@ -170,6 +163,7 @@ aws-threat-detection-pipeline/
 │   ├── step_functions.tf
 │   └── variables.tf
 ├── images/
+│   ├── architecture-diagram.png
 │   ├── stepfunctions-execution-graph.png
 │   ├── bedrock-analysis-output.png
 │   ├── ses-email-alert.png
