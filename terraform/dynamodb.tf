@@ -1,3 +1,7 @@
+# =============================================================================
+# DynamoDB: analyzed threat records (TTL for automatic expiry)
+# =============================================================================
+
 resource "aws_dynamodb_table" "threat_detection_events" {
   name         = "ThreatDetectionEvents"
   billing_mode = "PAY_PER_REQUEST"

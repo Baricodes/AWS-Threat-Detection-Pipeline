@@ -1,3 +1,7 @@
+# =============================================================================
+# Variables: AWS account / region
+# =============================================================================
+
 variable "aws_region" {
   description = "AWS region for resources."
   type        = string
@@ -8,6 +12,10 @@ variable "aws_account_id" {
   description = "AWS account ID for this deployment."
   type        = string
 }
+
+# =============================================================================
+# Variables: Amazon SES (email identity and alert recipient)
+# =============================================================================
 
 variable "ses_identity_email" {
   description = "Email address to register as a verified SES identity (check inbox to complete verification)."

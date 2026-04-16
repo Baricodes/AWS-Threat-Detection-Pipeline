@@ -1,8 +1,13 @@
+# =============================================================================
+# S3: CloudTrail log bucket (required trail destination; also holds historical logs)
+# =============================================================================
+
 resource "aws_s3_bucket" "cloudtrail_logs" {
   bucket = "threat-detection-cloudtrail-logs-us-east-1"
 }
 
 resource "aws_s3_bucket_policy" "cloudtrail_logs" {
+  # Grants CloudTrail ACL check and PutObject into AWSLogs/<account-id>/
   bucket = aws_s3_bucket.cloudtrail_logs.id
 
   policy = jsonencode({

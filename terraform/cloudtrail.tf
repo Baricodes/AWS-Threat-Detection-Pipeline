@@ -1,3 +1,7 @@
+# =============================================================================
+# CloudTrail: trail + IAM for delivery to CloudWatch Logs and S3
+# =============================================================================
+
 resource "aws_iam_role" "cloudtrail_to_cloudwatch" {
   name = "CloudTrailToCloudWatchRole"
 
@@ -19,6 +23,8 @@ resource "aws_iam_role_policy_attachment" "cloudtrail_cloudwatch_logs" {
   role       = aws_iam_role.cloudtrail_to_cloudwatch.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/CloudTrailCloudWatchLogsDeliveryRolePolicy"
 }
+
+# Multi-region management events; logs land in S3 (archive) and CloudWatch (real-time pipeline)
 
 resource "aws_cloudtrail" "threat_detection" {
   name           = "threat-detection-trail"

@@ -1,3 +1,7 @@
+# =============================================================================
+# Lambda: threat-log-enricher (CloudWatch Logs → Step Functions)
+# =============================================================================
+
 data "archive_file" "threat_log_enricher" {
   type        = "zip"
   source_file = "${path.module}/lambda/threat-log-enricher/lambda_function.py"
@@ -23,6 +27,10 @@ resource "aws_lambda_function" "threat_log_enricher" {
     }
   }
 }
+
+# -----------------------------------------------------------------------------
+# CloudWatch Logs subscription — high-risk CloudTrail events only (matches Lambda filter)
+# -----------------------------------------------------------------------------
 
 locals {
   # Matches threat-log-enricher HIGH_RISK_EVENTS; reduces Lambda invocations vs. forwarding all CloudTrail logs.
@@ -66,6 +74,10 @@ resource "aws_cloudwatch_log_subscription_filter" "threat_log_enricher_high_risk
   depends_on = [aws_lambda_permission.threat_log_enricher_cloudwatch_logs]
 }
 
+# =============================================================================
+# Lambda: threat-bedrock-analyzer (Bedrock threat scoring)
+# =============================================================================
+
 data "archive_file" "threat_bedrock_analyzer" {
   type        = "zip"
   source_file = "${path.module}/lambda/threat-bedrock-analyzer/lambda_function.py"
@@ -86,6 +98,10 @@ resource "aws_lambda_function" "threat_bedrock_analyzer" {
   memory_size = 256
 }
 
+# =============================================================================
+# Lambda: threat-record-writer (DynamoDB persistence)
+# =============================================================================
+
 data "archive_file" "threat_record_writer" {
   type        = "zip"
   source_file = "${path.module}/lambda/threat-record-writer/lambda_function.py"
@@ -105,6 +121,10 @@ resource "aws_lambda_function" "threat_record_writer" {
   timeout     = 30
   memory_size = 256
 }
+
+# =============================================================================
+# Lambda: threat-email-alerter (SES HTML alerts)
+# =============================================================================
 
 data "archive_file" "threat_email_alerter" {
   type        = "zip"
@@ -133,6 +153,10 @@ resource "aws_lambda_function" "threat_email_alerter" {
   }
 }
 
+# =============================================================================
+# IAM: shared role for all threat-detection Lambdas
+# =============================================================================
+
 resource "aws_iam_role" "threat_detection_lambda" {
   name = "ThreatDetectionLambdaRole"
 
@@ -149,6 +173,8 @@ resource "aws_iam_role" "threat_detection_lambda" {
     ]
   })
 }
+
+# Inline policy: Bedrock, DynamoDB, CloudWatch Logs, SES
 
 resource "aws_iam_role_policy" "threat_detection_lambda" {
   name = "ThreatDetectionLambdaPolicy"
@@ -193,6 +219,8 @@ resource "aws_iam_role_policy" "threat_detection_lambda" {
     ]
   })
 }
+
+# Inline policy: log enricher calls states:StartExecution on this pipeline
 
 resource "aws_iam_role_policy" "threat_detection_sfn_start" {
   name = "ThreatDetectionSFNStartPolicy"

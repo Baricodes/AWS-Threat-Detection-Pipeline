@@ -1,3 +1,7 @@
+# =============================================================================
+# Step Functions: execution role (invoke Lambdas, optional log delivery)
+# =============================================================================
+
 resource "aws_iam_role" "threat_detection_step_functions" {
   name = "ThreatDetectionStepFunctionsRole"
 
@@ -48,6 +52,10 @@ resource "aws_iam_role_policy" "threat_detection_step_functions" {
     ]
   })
 }
+
+# =============================================================================
+# Step Functions: threat detection state machine definition
+# =============================================================================
 
 resource "aws_sfn_state_machine" "threat_detection_pipeline" {
   name     = "ThreatDetectionPipeline"
