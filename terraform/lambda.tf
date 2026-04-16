@@ -16,6 +16,12 @@ resource "aws_lambda_function" "threat_log_enricher" {
 
   timeout     = 60
   memory_size = 256
+
+  environment {
+    variables = {
+      STATE_MACHINE_ARN = aws_sfn_state_machine.threat_detection_pipeline.arn
+    }
+  }
 }
 
 locals {
@@ -88,7 +94,7 @@ data "archive_file" "threat_record_writer" {
 
 resource "aws_lambda_function" "threat_record_writer" {
   function_name = "threat-record-writer"
-  description   = "Writes analyzed threat events to DynamoDB and publishes high-score alerts to SNS."
+  description   = "Writes analyzed threat events to DynamoDB."
   role          = aws_iam_role.threat_detection_lambda.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
@@ -167,12 +173,6 @@ resource "aws_iam_role_policy" "threat_detection_lambda" {
           "dynamodb:Query",
         ]
         Resource = aws_dynamodb_table.threat_detection_events.arn
-      },
-      {
-        Sid      = "SNSPublish"
-        Effect   = "Allow"
-        Action   = "sns:Publish"
-        Resource = "arn:aws:sns:${var.aws_region}:${var.aws_account_id}:threat-detection-alerts"
       },
       {
         Sid    = "CloudWatchLogs"

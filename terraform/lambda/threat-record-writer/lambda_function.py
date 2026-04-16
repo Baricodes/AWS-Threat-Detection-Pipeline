@@ -12,7 +12,7 @@ ALERT_THRESHOLD = 7  # Alert on threat scores >= 7
 def lambda_handler(event, context):
     """
     Persists analyzed threat event to DynamoDB.
-    Sends SNS alert if threat score meets threshold.
+    High-score events are emailed by the threat-email-alerter Step Functions task.
     """
     table = dynamodb.Table(TABLE_NAME)
 
@@ -48,5 +48,5 @@ def lambda_handler(event, context):
         "eventId": event.get("eventId"),
         "threatScore": threat_score,
         "severity": event.get("severity"),
-        "alertSent": threat_score >= ALERT_THRESHOLD,
+        "meetsAlertThreshold": threat_score >= ALERT_THRESHOLD,
     }
