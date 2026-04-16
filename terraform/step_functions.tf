@@ -56,47 +56,11 @@ resource "aws_sfn_state_machine" "threat_detection_pipeline" {
 
   definition = jsonencode({
     Comment = "AI-Powered Cloud Threat Detection Pipeline"
-    StartAt = "EnrichLogEvent"
+    StartAt = "ProcessEachEvent"
     States = {
-      EnrichLogEvent = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
-        Parameters = {
-          FunctionName = "threat-log-enricher"
-          "Payload.$"  = "$"
-        }
-        ResultPath = "$.enrichResult"
-        Next       = "CheckEventsFound"
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            Next        = "HandleError"
-            ResultPath  = "$.error"
-          }
-        ]
-        Retry = [
-          {
-            ErrorEquals     = ["Lambda.ServiceException", "Lambda.AWSLambdaException"]
-            IntervalSeconds = 2
-            MaxAttempts     = 3
-            BackoffRate     = 2
-          }
-        ]
-      }
-      CheckEventsFound = {
-        Type = "Choice"
-        Choices = [
-          {
-            Variable           = "$.enrichResult.Payload.eventCount"
-            NumericGreaterThan = 0
-            Next               = "ProcessEachEvent"
-          }
-        ]
-        Default = "NoThreatsFound"
-      }
       ProcessEachEvent = {
         Type           = "Map"
-        ItemsPath      = "$.enrichResult.Payload.eventsToAnalyze"
+        ItemsPath      = "$.eventsToAnalyze"
         MaxConcurrency = 5
         Iterator = {
           StartAt = "AnalyzeThreat"
@@ -110,6 +74,9 @@ resource "aws_sfn_state_machine" "threat_detection_pipeline" {
                   "enrichedEvent.$" = "$"
                 }
               }
+              ResultSelector = {
+                "analysisPayload.$" = "$.Payload"
+              }
               ResultPath = "$.analysisResult"
               Next       = "WriteThreatRecord"
               Retry = [
@@ -120,38 +87,55 @@ resource "aws_sfn_state_machine" "threat_detection_pipeline" {
                   BackoffRate     = 2
                 }
               ]
+              Catch = [
+                {
+                  ErrorEquals = ["States.ALL"]
+                  Next        = "SkipEvent"
+                  ResultPath  = "$.error"
+                }
+              ]
             }
             WriteThreatRecord = {
               Type     = "Task"
               Resource = "arn:aws:states:::lambda:invoke"
               Parameters = {
                 FunctionName = "threat-record-writer"
-                "Payload.$"  = "$.analysisResult.Payload"
+                "Payload.$"  = "$.analysisResult.analysisPayload"
+              }
+              ResultSelector = {
+                "recordPayload.$" = "$.Payload"
+              }
+              ResultPath = "$.recordResult"
+              Next       = "SendEmailAlert"
+            }
+            SendEmailAlert = {
+              Type     = "Task"
+              Resource = "arn:aws:states:::lambda:invoke"
+              Parameters = {
+                FunctionName = "threat-email-alerter"
+                "Payload.$"  = "$.analysisResult.analysisPayload"
               }
               End = true
+              Catch = [
+                {
+                  ErrorEquals = ["States.ALL"]
+                  Next        = "SkipEvent"
+                  ResultPath  = "$.error"
+                }
+              ]
+            }
+            SkipEvent = {
+              Type = "Pass"
+              End  = true
             }
           }
         }
         Next = "PipelineComplete"
       }
-      NoThreatsFound = {
-        Type = "Pass"
-        Result = {
-          message = "No high-risk events in this batch"
-        }
-        End = true
-      }
       PipelineComplete = {
         Type = "Pass"
         Result = {
           message = "Threat detection pipeline completed"
-        }
-        End = true
-      }
-      HandleError = {
-        Type = "Pass"
-        Result = {
-          message = "Pipeline encountered an error"
         }
         End = true
       }

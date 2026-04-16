@@ -18,6 +18,48 @@ resource "aws_lambda_function" "threat_log_enricher" {
   memory_size = 256
 }
 
+locals {
+  # Matches threat-log-enricher HIGH_RISK_EVENTS; reduces Lambda invocations vs. forwarding all CloudTrail logs.
+  high_risk_event_filter_pattern = join(" || ", [
+    for name in [
+      "ConsoleLogin",
+      "CreateUser",
+      "DeleteUser",
+      "AttachUserPolicy",
+      "PutUserPolicy",
+      "CreateAccessKey",
+      "DeleteTrail",
+      "StopLogging",
+      "DeleteBucket",
+      "PutBucketPolicy",
+      "AuthorizeSecurityGroupIngress",
+      "CreateVpc",
+      "RunInstances",
+      "AssumeRoleWithWebIdentity",
+      "GetSecretValue",
+      "DeleteSecret",
+    ] : "($.eventName = \"${name}\")"
+  ])
+  high_risk_event_filter_pattern_wrapped = "{ (${local.high_risk_event_filter_pattern}) }"
+}
+
+resource "aws_lambda_permission" "threat_log_enricher_cloudwatch_logs" {
+  statement_id  = "AllowExecutionFromCloudWatchLogs"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.threat_log_enricher.function_name
+  principal     = "logs.amazonaws.com"
+  source_arn    = "${aws_cloudwatch_log_group.cloudtrail_threat_detection.arn}:*"
+}
+
+resource "aws_cloudwatch_log_subscription_filter" "threat_log_enricher_high_risk" {
+  name            = "high-risk-event-filter"
+  log_group_name  = aws_cloudwatch_log_group.cloudtrail_threat_detection.name
+  filter_pattern  = local.high_risk_event_filter_pattern_wrapped
+  destination_arn = aws_lambda_function.threat_log_enricher.arn
+
+  depends_on = [aws_lambda_permission.threat_log_enricher_cloudwatch_logs]
+}
+
 data "archive_file" "threat_bedrock_analyzer" {
   type        = "zip"
   source_file = "${path.module}/lambda/threat-bedrock-analyzer/lambda_function.py"
@@ -56,7 +98,33 @@ resource "aws_lambda_function" "threat_record_writer" {
 
   timeout     = 30
   memory_size = 256
-  
+}
+
+data "archive_file" "threat_email_alerter" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/threat-email-alerter/lambda_function.py"
+  output_path = "${path.module}/.build/threat-email-alerter.zip"
+}
+
+resource "aws_lambda_function" "threat_email_alerter" {
+  function_name = "threat-email-alerter"
+  description   = "Sends HTML threat alert emails via SES when threat score is at or above threshold."
+  role          = aws_iam_role.threat_detection_lambda.arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.12"
+
+  filename         = data.archive_file.threat_email_alerter.output_path
+  source_code_hash = data.archive_file.threat_email_alerter.output_base64sha256
+
+  timeout     = 30
+  memory_size = 256
+
+  environment {
+    variables = {
+      SES_FROM_EMAIL = var.ses_identity_email
+      SES_TO_EMAIL   = var.ses_alert_to_email != "" ? var.ses_alert_to_email : var.ses_identity_email
+    }
+  }
 }
 
 resource "aws_iam_role" "threat_detection_lambda" {
@@ -115,6 +183,29 @@ resource "aws_iam_role_policy" "threat_detection_lambda" {
           "logs:PutLogEvents",
         ]
         Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Sid      = "SESSendEmail"
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+        Resource = aws_ses_email_identity.this.arn
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "threat_detection_sfn_start" {
+  name = "ThreatDetectionSFNStartPolicy"
+  role = aws_iam_role.threat_detection_lambda.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "StartStepFunctions"
+        Effect   = "Allow"
+        Action   = "states:StartExecution"
+        Resource = aws_sfn_state_machine.threat_detection_pipeline.arn
       },
     ]
   })
