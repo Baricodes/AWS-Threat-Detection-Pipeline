@@ -2,8 +2,6 @@
 
 > Real-time AWS security event analysis powered by Amazon Bedrock (Claude AI), Step Functions, and Lambda — automatically detecting, scoring, and alerting on suspicious cloud activity.
 
-![Step Functions Execution](images/stepfunctions-execution-graph.png)
-
 ---
 
 ## 🚀 Overview
