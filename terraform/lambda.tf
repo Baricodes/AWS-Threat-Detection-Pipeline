@@ -12,7 +12,7 @@ data "archive_file" "threat_log_enricher" {
 resource "aws_lambda_function" "threat_log_enricher" {
   function_name = "threat-log-enricher"
   description   = "Decodes CloudWatch Logs subscription payloads and enriches high-risk CloudTrail events."
-  role          = aws_iam_role.threat_detection_lambda.arn
+  role          = aws_iam_role.threat_detection_log_enricher.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
 
@@ -51,6 +51,20 @@ locals {
     ] : "($.eventName = \"${name}\")"
   ])
   high_risk_event_filter_pattern_wrapped = "{ (${local.high_risk_event_filter_pattern}) }"
+
+  # Per-function Lambda execution log group ARNs (CreateLogGroup + log streams).
+  threat_lambda_log_resources = {
+    for fn in [
+      "threat-log-enricher",
+      "threat-bedrock-analyzer",
+      "threat-record-writer",
+      "threat-email-alerter",
+      "threat-remediator",
+    ] : fn => [
+      "arn:aws:logs:${var.aws_region}:${var.aws_account_id}:log-group:/aws/lambda/${fn}",
+      "arn:aws:logs:${var.aws_region}:${var.aws_account_id}:log-group:/aws/lambda/${fn}:*",
+    ]
+  }
 }
 
 resource "aws_lambda_permission" "threat_log_enricher_cloudwatch_logs" {
@@ -80,7 +94,7 @@ data "archive_file" "threat_bedrock_analyzer" {
 resource "aws_lambda_function" "threat_bedrock_analyzer" {
   function_name = "threat-bedrock-analyzer"
   description   = "Calls Bedrock Claude Haiku to analyze enriched CloudTrail events for threat scoring."
-  role          = aws_iam_role.threat_detection_lambda.arn
+  role          = aws_iam_role.threat_detection_bedrock_analyzer.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
 
@@ -100,7 +114,7 @@ data "archive_file" "threat_record_writer" {
 resource "aws_lambda_function" "threat_record_writer" {
   function_name = "threat-record-writer"
   description   = "Writes analyzed threat events to DynamoDB."
-  role          = aws_iam_role.threat_detection_lambda.arn
+  role          = aws_iam_role.threat_detection_record_writer.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
 
@@ -120,7 +134,7 @@ data "archive_file" "threat_email_alerter" {
 resource "aws_lambda_function" "threat_email_alerter" {
   function_name = "threat-email-alerter"
   description   = "Sends HTML threat alert emails via SES when threat score is at or above threshold."
-  role          = aws_iam_role.threat_detection_lambda.arn
+  role          = aws_iam_role.threat_detection_email_alerter.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
 
@@ -146,7 +160,7 @@ data "archive_file" "threat_remediator" {
 resource "aws_lambda_function" "threat_remediator" {
   function_name = "threat-remediator"
   description   = "Remediates critical threats: IAM key deactivation, deny policy attach, EC2 quarantine."
-  role          = aws_iam_role.threat_detection_lambda.arn
+  role          = aws_iam_role.threat_detection_remediator.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.12"
 
@@ -166,8 +180,8 @@ resource "aws_lambda_function" "threat_remediator" {
   }
 }
 
-resource "aws_iam_role" "threat_detection_lambda" {
-  name = "ThreatDetectionLambdaRole"
+resource "aws_iam_role" "threat_detection_log_enricher" {
+  name = "ThreatDetectionLogEnricherRole"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -183,10 +197,53 @@ resource "aws_iam_role" "threat_detection_lambda" {
   })
 }
 
-# Core pipeline permissions (Bedrock, DynamoDB, SES to verified identity, CloudWatch Logs).
-resource "aws_iam_role_policy" "threat_detection_lambda" {
-  name = "ThreatDetectionLambdaPolicy"
-  role = aws_iam_role.threat_detection_lambda.name
+resource "aws_iam_role_policy" "threat_detection_log_enricher" {
+  name = "ThreatDetectionLogEnricherPolicy"
+  role = aws_iam_role.threat_detection_log_enricher.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = local.threat_lambda_log_resources["threat-log-enricher"]
+      },
+      {
+        Sid      = "StartStepFunctions"
+        Effect   = "Allow"
+        Action   = "states:StartExecution"
+        Resource = aws_sfn_state_machine.threat_detection_pipeline.arn
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role" "threat_detection_bedrock_analyzer" {
+  name = "ThreatDetectionBedrockAnalyzerRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "threat_detection_bedrock_analyzer" {
+  name = "ThreatDetectionBedrockAnalyzerPolicy"
+  role = aws_iam_role.threat_detection_bedrock_analyzer.name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -197,6 +254,44 @@ resource "aws_iam_role_policy" "threat_detection_lambda" {
         Action   = "bedrock:InvokeModel"
         Resource = "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-haiku-20240307-v1:0"
       },
+      {
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = local.threat_lambda_log_resources["threat-bedrock-analyzer"]
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role" "threat_detection_record_writer" {
+  name = "ThreatDetectionRecordWriterRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "threat_detection_record_writer" {
+  name = "ThreatDetectionRecordWriterPolicy"
+  role = aws_iam_role.threat_detection_record_writer.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
         Sid    = "DynamoDBWrite"
         Effect = "Allow"
@@ -216,40 +311,76 @@ resource "aws_iam_role_policy" "threat_detection_lambda" {
           "logs:CreateLogStream",
           "logs:PutLogEvents",
         ]
-        Resource = "arn:aws:logs:*:*:*"
+        Resource = local.threat_lambda_log_resources["threat-record-writer"]
       },
+    ]
+  })
+}
+
+resource "aws_iam_role" "threat_detection_email_alerter" {
+  name = "ThreatDetectionEmailAlerterRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "threat_detection_email_alerter" {
+  name = "ThreatDetectionEmailAlerterPolicy"
+  role = aws_iam_role.threat_detection_email_alerter.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
       {
         Sid      = "SESSendEmail"
         Effect   = "Allow"
         Action   = ["ses:SendEmail", "ses:SendRawEmail"]
         Resource = aws_ses_email_identity.this.arn
       },
-    ]
-  })
-}
-
-# threat-log-enricher: states:StartExecution on the pipeline state machine only.
-resource "aws_iam_role_policy" "threat_detection_sfn_start" {
-  name = "ThreatDetectionSFNStartPolicy"
-  role = aws_iam_role.threat_detection_lambda.name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
       {
-        Sid      = "StartStepFunctions"
-        Effect   = "Allow"
-        Action   = "states:StartExecution"
-        Resource = aws_sfn_state_machine.threat_detection_pipeline.arn
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = local.threat_lambda_log_resources["threat-email-alerter"]
       },
     ]
   })
 }
 
-# threat-remediator: IAM containment, EC2 quarantine, SES for remediation summary (broader than core SES policy).
-resource "aws_iam_role_policy" "threat_remediation" {
-  name = "ThreatRemediationPolicy"
-  role = aws_iam_role.threat_detection_lambda.name
+resource "aws_iam_role" "threat_detection_remediator" {
+  name = "ThreatDetectionRemediatorRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "threat_detection_remediator" {
+  name = "ThreatDetectionRemediatorPolicy"
+  role = aws_iam_role.threat_detection_remediator.name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -276,22 +407,20 @@ resource "aws_iam_role_policy" "threat_remediation" {
         Resource = "*"
       },
       {
-        Sid    = "SESRemediationAlert"
-        Effect = "Allow"
-        Action = [
-          "ses:SendEmail",
-          "ses:SendRawEmail",
-        ]
-        Resource = "*"
+        Sid      = "SESRemediationAlert"
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+        Resource = aws_ses_email_identity.this.arn
       },
       {
-        Sid    = "StepFunctionsSendTaskResult"
+        Sid    = "CloudWatchLogs"
         Effect = "Allow"
         Action = [
-          "states:SendTaskSuccess",
-          "states:SendTaskFailure",
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
         ]
-        Resource = "*"
+        Resource = local.threat_lambda_log_resources["threat-remediator"]
       },
     ]
   })

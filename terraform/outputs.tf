@@ -18,9 +18,29 @@ output "ses_identity_email" {
   value       = aws_ses_email_identity.this.email
 }
 
-output "threat_detection_lambda_role_arn" {
-  description = "IAM role ARN for the threat detection Lambda function."
-  value       = aws_iam_role.threat_detection_lambda.arn
+output "threat_detection_log_enricher_role_arn" {
+  description = "IAM role ARN for threat-log-enricher."
+  value       = aws_iam_role.threat_detection_log_enricher.arn
+}
+
+output "threat_detection_bedrock_analyzer_role_arn" {
+  description = "IAM role ARN for threat-bedrock-analyzer."
+  value       = aws_iam_role.threat_detection_bedrock_analyzer.arn
+}
+
+output "threat_detection_record_writer_role_arn" {
+  description = "IAM role ARN for threat-record-writer."
+  value       = aws_iam_role.threat_detection_record_writer.arn
+}
+
+output "threat_detection_email_alerter_role_arn" {
+  description = "IAM role ARN for threat-email-alerter."
+  value       = aws_iam_role.threat_detection_email_alerter.arn
+}
+
+output "threat_detection_remediator_role_arn" {
+  description = "IAM role ARN for threat-remediator."
+  value       = aws_iam_role.threat_detection_remediator.arn
 }
 
 output "threat_detection_step_functions_role_arn" {
