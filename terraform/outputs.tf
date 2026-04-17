@@ -7,6 +7,18 @@ output "aws_region" {
   value       = var.aws_region
 }
 
+# --- VPC ---
+
+output "threat_detection_vpc_id" {
+  description = "ID of the threat-detection VPC."
+  value       = aws_vpc.default_vpc.id
+}
+
+output "threat_detection_vpc_cidr_block" {
+  description = "IPv4 CIDR of the threat-detection VPC."
+  value       = aws_vpc.default_vpc.cidr_block
+}
+
 # --- SES ---
 
 output "ses_identity_email" {

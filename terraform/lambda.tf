@@ -154,6 +154,39 @@ resource "aws_lambda_function" "threat_email_alerter" {
 }
 
 # =============================================================================
+# Lambda: threat-remediator (IAM / EC2 remediation for critical threats)
+# =============================================================================
+
+data "archive_file" "threat_remediator" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/threat-remediator/lambda_function.py"
+  output_path = "${path.module}/.build/threat-remediator.zip"
+}
+
+resource "aws_lambda_function" "threat_remediator" {
+  function_name = "threat-remediator"
+  description   = "Remediates critical threats: IAM key deactivation, deny policy attach, EC2 quarantine."
+  role          = aws_iam_role.threat_detection_lambda.arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.12"
+
+  filename         = data.archive_file.threat_remediator.output_path
+  source_code_hash = data.archive_file.threat_remediator.output_base64sha256
+
+  timeout     = 60
+  memory_size = 256
+
+  environment {
+    variables = {
+      QUARANTINE_SG_ID     = aws_security_group.quarantine_sg.id
+      DENY_POLICY_ARN      = "arn:aws:iam::aws:policy/AWSDenyAll"
+      SES_SENDER_EMAIL     = var.ses_identity_email
+      SES_RECIPIENT_EMAIL  = var.ses_alert_to_email != "" ? var.ses_alert_to_email : var.ses_identity_email
+    }
+  }
+}
+
+# =============================================================================
 # IAM: shared role for all threat-detection Lambdas
 # =============================================================================
 
@@ -234,6 +267,58 @@ resource "aws_iam_role_policy" "threat_detection_sfn_start" {
         Effect   = "Allow"
         Action   = "states:StartExecution"
         Resource = aws_sfn_state_machine.threat_detection_pipeline.arn
+      },
+    ]
+  })
+}
+
+# Inline policy: IAM / EC2 remediation, SES remediation alerts, Step Functions task callbacks
+
+resource "aws_iam_role_policy" "threat_remediation" {
+  name = "ThreatRemediationPolicy"
+  role = aws_iam_role.threat_detection_lambda.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DeactivateIAMCredentials"
+        Effect = "Allow"
+        Action = [
+          "iam:UpdateAccessKey",
+          "iam:ListAccessKeys",
+          "iam:AttachUserPolicy",
+          "iam:GetUser",
+        ]
+        Resource = "arn:aws:iam::*:user/*"
+      },
+      {
+        Sid    = "IsolateEC2Instance"
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeInstances",
+          "ec2:DescribeSecurityGroups",
+          "ec2:ModifyInstanceAttribute",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "SESRemediationAlert"
+        Effect = "Allow"
+        Action = [
+          "ses:SendEmail",
+          "ses:SendRawEmail",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "StepFunctionsSendTaskResult"
+        Effect = "Allow"
+        Action = [
+          "states:SendTaskSuccess",
+          "states:SendTaskFailure",
+        ]
+        Resource = "*"
       },
     ]
   })
