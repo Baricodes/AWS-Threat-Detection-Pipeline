@@ -1,3 +1,5 @@
 aws_region           = "us-east-1"
 aws_account_id       = "000000000000"
 ses_identity_email   = "verify-me@example.com"
+# Optional. Leave "" to send threat alerts to ses_identity_email (same inbox you verify in SES).
+ses_alert_to_email   = ""

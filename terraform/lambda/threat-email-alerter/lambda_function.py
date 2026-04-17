@@ -3,8 +3,8 @@ import os
 
 ses = boto3.client("ses", region_name="us-east-1")
 
-FROM_EMAIL = os.environ.get("SES_FROM_EMAIL", "")
-TO_EMAIL = os.environ.get("SES_TO_EMAIL", "")
+# Env: SES_EMAIL — populated by Terraform from var.ses_identity_email (verified SES address).
+SES_EMAIL = (os.environ.get("SES_EMAIL") or "").strip()
 
 SEVERITY_COLORS = {
     "CRITICAL": "#FF0000",
@@ -213,15 +213,10 @@ def build_html_email(event: dict, analysis: dict) -> str:
 
 
 def lambda_handler(event, context):
-    """
-    Receives an analyzed threat event and sends a formatted HTML
-    email via SES. Only fires for threat scores >= 7.
-    """
     threat_score = event.get("threatScore", 0)
     analysis = event.get("analysis", {})
     severity = event.get("severity", "UNKNOWN")
 
-    # Only email on high-severity threats
     if threat_score < 7:
         return {
             "statusCode": 200,
@@ -229,8 +224,8 @@ def lambda_handler(event, context):
             "reason": f"Score {threat_score} below threshold",
         }
 
-    if not FROM_EMAIL or not TO_EMAIL:
-        raise ValueError("SES_FROM_EMAIL and SES_TO_EMAIL environment variables must be set")
+    if not SES_EMAIL:
+        raise ValueError("SES_EMAIL must be set to the verified SES identity (from Terraform ses_identity_email).")
 
     subject = (
         f"[{severity}] Threat Detected — "
@@ -240,7 +235,6 @@ def lambda_handler(event, context):
 
     html_body = build_html_email(event, analysis)
 
-    # Plain text fallback for email clients that don't render HTML
     text_body = f"""
 THREAT DETECTED — {severity} (Score: {threat_score}/10)
 
@@ -266,8 +260,8 @@ Event ID: {event.get("eventId", "")}
 """
 
     ses.send_email(
-        Source=FROM_EMAIL,
-        Destination={"ToAddresses": [TO_EMAIL]},
+        Source=SES_EMAIL,
+        Destination={"ToAddresses": [SES_EMAIL]},
         Message={
             "Subject": {"Data": subject, "Charset": "UTF-8"},
             "Body": {

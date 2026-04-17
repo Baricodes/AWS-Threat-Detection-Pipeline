@@ -1,13 +1,8 @@
-# =============================================================================
-# S3: CloudTrail log bucket (required trail destination; also holds historical logs)
-# =============================================================================
-
 resource "aws_s3_bucket" "cloudtrail_logs" {
   bucket = "threat-detection-cloudtrail-logs-us-east-1"
 }
 
 resource "aws_s3_bucket_policy" "cloudtrail_logs" {
-  # Grants CloudTrail ACL check and PutObject into AWSLogs/<account-id>/
   bucket = aws_s3_bucket.cloudtrail_logs.id
 
   policy = jsonencode({
@@ -21,6 +16,11 @@ resource "aws_s3_bucket_policy" "cloudtrail_logs" {
         }
         Action   = "s3:GetBucketAcl"
         Resource = aws_s3_bucket.cloudtrail_logs.arn
+        Condition = {
+          StringEquals = {
+            "aws:SourceArn" = "arn:aws:cloudtrail:${var.aws_region}:${var.aws_account_id}:trail/threat-detection-trail"
+          }
+        }
       },
       {
         Sid    = "AWSCloudTrailWrite"
@@ -32,7 +32,8 @@ resource "aws_s3_bucket_policy" "cloudtrail_logs" {
         Resource = "${aws_s3_bucket.cloudtrail_logs.arn}/AWSLogs/${var.aws_account_id}/*"
         Condition = {
           StringEquals = {
-            "s3:x-amz-acl" = "bucket-owner-full-control"
+            "s3:x-amz-acl"  = "bucket-owner-full-control"
+            "aws:SourceArn" = "arn:aws:cloudtrail:${var.aws_region}:${var.aws_account_id}:trail/threat-detection-trail"
           }
         }
       }

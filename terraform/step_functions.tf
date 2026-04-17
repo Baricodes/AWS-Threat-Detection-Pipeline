@@ -1,7 +1,3 @@
-# =============================================================================
-# Step Functions: execution role (invoke Lambdas, optional log delivery)
-# =============================================================================
-
 resource "aws_iam_role" "threat_detection_step_functions" {
   name = "ThreatDetectionStepFunctionsRole"
 
@@ -53,17 +49,13 @@ resource "aws_iam_role_policy" "threat_detection_step_functions" {
   })
 }
 
-# =============================================================================
-# Step Functions: threat detection state machine definition
-# =============================================================================
-
 resource "aws_sfn_state_machine" "threat_detection_pipeline" {
   name     = "ThreatDetectionPipeline"
   role_arn = aws_iam_role.threat_detection_step_functions.arn
   type     = "STANDARD"
 
   definition = jsonencode({
-    Comment = "AI-Powered Cloud Threat Detection Pipeline"
+    Comment = "AI-Powered Threat Detection + SOAR Remediation Pipeline"
     StartAt = "ProcessEachEvent"
     States = {
       ProcessEachEvent = {
@@ -83,10 +75,10 @@ resource "aws_sfn_state_machine" "threat_detection_pipeline" {
                 }
               }
               ResultSelector = {
-                "analysisPayload.$" = "$.Payload"
+                "result.$" = "$.Payload"
               }
               ResultPath = "$.analysisResult"
-              Next       = "WriteThreatRecord"
+              Next       = "MergeAnalysis"
               Retry = [
                 {
                   ErrorEquals     = ["Lambda.ServiceException"]
@@ -95,11 +87,120 @@ resource "aws_sfn_state_machine" "threat_detection_pipeline" {
                   BackoffRate     = 2
                 }
               ]
+            }
+            MergeAnalysis = {
+              Type = "Pass"
+              Parameters = {
+                "accountId.$"         = "$.analysisResult.result.accountId"
+                "awsRegion.$"         = "$.analysisResult.result.awsRegion"
+                "eventName.$"         = "$.analysisResult.result.eventName"
+                "eventTime.$"         = "$.analysisResult.result.eventTime"
+                "threatId.$"          = "$.analysisResult.result.threatId"
+                "sourceIPAddress.$"   = "$.analysisResult.result.sourceIPAddress"
+                "userIdentity.$"      = "$.analysisResult.result.userIdentity"
+                "responseElements.$"  = "$.analysisResult.result.responseElements"
+                "requestParameters.$" = "$.analysisResult.result.requestParameters"
+                "threatScore.$"       = "$.analysisResult.result.threatScore"
+                "severity.$"          = "$.analysisResult.result.severity"
+                "summary.$"           = "$.analysisResult.result.analysis.summary"
+                "reasoning.$"         = "$.analysisResult.result.analysis.reasoning"
+                "indicators.$"        = "$.analysisResult.result.analysis.indicators"
+                "recommendedAction.$" = "$.analysisResult.result.analysis.recommendedAction"
+                "eventId.$"           = "$.analysisResult.result.eventId"
+                "originalEventId.$"   = "$.analysisResult.result.originalEventId"
+                "userArn.$"           = "$.analysisResult.result.userArn"
+                "userType.$"          = "$.analysisResult.result.userType"
+                "userAgent.$"         = "$.analysisResult.result.userAgent"
+                "errorCode.$"         = "$.analysisResult.result.errorCode"
+                "errorMessage.$"      = "$.analysisResult.result.errorMessage"
+                "ingestedAt.$"        = "$.analysisResult.result.ingestedAt"
+                "rawEvent.$"          = "$.analysisResult.result.rawEvent"
+                analysis = {
+                  "summary.$"           = "$.analysisResult.result.analysis.summary"
+                  "reasoning.$"         = "$.analysisResult.result.analysis.reasoning"
+                  "indicators.$"        = "$.analysisResult.result.analysis.indicators"
+                  "recommendedAction.$" = "$.analysisResult.result.analysis.recommendedAction"
+                }
+              }
+              Next = "ChoosePath"
+            }
+            ChoosePath = {
+              Type = "Choice"
+              Choices = [
+                {
+                  Variable                 = "$.threatScore"
+                  NumericGreaterThanEquals = 9
+                  Next                     = "RemediateThreat"
+                },
+                {
+                  Variable                 = "$.threatScore"
+                  NumericGreaterThanEquals = 7
+                  Next                     = "WriteThreatRecord"
+                },
+              ]
+              Default = "WriteThreatRecord"
+            }
+            RemediateThreat = {
+              Type     = "Task"
+              Resource = "arn:aws:states:::lambda:invoke"
+              Parameters = {
+                FunctionName = "threat-remediator"
+                "Payload.$"  = "$"
+              }
+              ResultSelector = {
+                "result.$" = "$.Payload"
+              }
+              ResultPath = "$.remediationOutput"
+              Next       = "WriteThreatRecordWithRemediation"
+              Retry = [
+                {
+                  ErrorEquals     = ["Lambda.ServiceException"]
+                  IntervalSeconds = 5
+                  MaxAttempts     = 1
+                  BackoffRate     = 2
+                }
+              ]
               Catch = [
                 {
                   ErrorEquals = ["States.ALL"]
-                  Next        = "SkipEvent"
-                  ResultPath  = "$.error"
+                  Next        = "WriteThreatRecord"
+                  ResultPath  = "$.remediationError"
+                }
+              ]
+            }
+            WriteThreatRecordWithRemediation = {
+              Type     = "Task"
+              Resource = "arn:aws:states:::lambda:invoke"
+              Parameters = {
+                FunctionName = "threat-record-writer"
+                "Payload.$"  = "$"
+              }
+              ResultPath = null
+              Next       = "SendCriticalAlert"
+              Retry = [
+                {
+                  ErrorEquals     = ["Lambda.ServiceException"]
+                  IntervalSeconds = 5
+                  MaxAttempts     = 2
+                  BackoffRate     = 2
+                }
+              ]
+            }
+            SendCriticalAlert = {
+              Type     = "Task"
+              Resource = "arn:aws:states:::lambda:invoke"
+              Parameters = {
+                FunctionName = "threat-email-alerter"
+                "Payload.$"  = "$"
+              }
+              ResultPath = null
+              End        = true
+              Retry = [
+                {
+                  ErrorEquals     = ["Lambda.ServiceException"]
+                  IntervalSeconds = 5
+                  MaxAttempts     = 2
+                  BackoffRate     = 2
                 }
               ]
             }
@@ -108,33 +209,50 @@ resource "aws_sfn_state_machine" "threat_detection_pipeline" {
               Resource = "arn:aws:states:::lambda:invoke"
               Parameters = {
                 FunctionName = "threat-record-writer"
-                "Payload.$"  = "$.analysisResult.analysisPayload"
+                "Payload.$"  = "$"
               }
-              ResultSelector = {
-                "recordPayload.$" = "$.Payload"
-              }
-              ResultPath = "$.recordResult"
-              Next       = "SendEmailAlert"
+              ResultPath = null
+              Next       = "CheckScoreForAlert"
+              Retry = [
+                {
+                  ErrorEquals     = ["Lambda.ServiceException"]
+                  IntervalSeconds = 5
+                  MaxAttempts     = 2
+                  BackoffRate     = 2
+                }
+              ]
+            }
+            CheckScoreForAlert = {
+              Type = "Choice"
+              Choices = [
+                {
+                  Variable                 = "$.threatScore"
+                  NumericGreaterThanEquals = 7
+                  Next                     = "SendEmailAlert"
+                },
+              ]
+              Default = "End"
             }
             SendEmailAlert = {
               Type     = "Task"
               Resource = "arn:aws:states:::lambda:invoke"
               Parameters = {
                 FunctionName = "threat-email-alerter"
-                "Payload.$"  = "$.analysisResult.analysisPayload"
+                "Payload.$"  = "$"
               }
-              End = true
-              Catch = [
+              ResultPath = null
+              End        = true
+              Retry = [
                 {
-                  ErrorEquals = ["States.ALL"]
-                  Next        = "SkipEvent"
-                  ResultPath  = "$.error"
+                  ErrorEquals     = ["Lambda.ServiceException"]
+                  IntervalSeconds = 5
+                  MaxAttempts     = 2
+                  BackoffRate     = 2
                 }
               ]
             }
-            SkipEvent = {
-              Type = "Pass"
-              End  = true
+            End = {
+              Type = "Succeed"
             }
           }
         }

@@ -1,7 +1,3 @@
-# =============================================================================
-# Quarantine security group (SOAR): zero-traffic isolation
-# =============================================================================
-
 resource "aws_security_group" "quarantine_sg" {
   name                   = "quarantine-sg"
   description            = "SOAR: Zero-traffic isolation for compromised instances."

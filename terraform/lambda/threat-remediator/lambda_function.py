@@ -26,19 +26,12 @@ INFRASTRUCTURE_EVENTS = {
 
 
 def lambda_handler(event, context):
-    """
-    Receives a scored threat record from Step Functions.
-    Only fires for CRITICAL (score >= 9) events.
-    Returns a remediation_result dict for the next state.
-    """
     logger.info(f"Remediation triggered: {json.dumps(event)}")
 
     event_name   = event.get('eventName', '')
     principal    = event.get('userIdentity', {}).get('userName') or \
                    event.get('userIdentity', {}).get('arn', 'UNKNOWN')
     threat_id    = event.get('threatId', '')
-    threat_score = event.get('threatScore', 9)
-    source_ip    = event.get('sourceIPAddress', '')
 
     remediation = {
         'threatId':          threat_id,
@@ -125,13 +118,10 @@ def _send_remediation_alert(event, remediation):
 
 
 def _remediate_iam(event, principal, remediation):
-    """Deactivate all active access keys and attach DenyAll policy."""
-
     if not principal or principal == 'UNKNOWN':
         remediation['actionsTaken'].append('SKIPPED: could not determine principal')
         return
 
-    # 1. Deactivate all active access keys
     try:
         keys = iam.list_access_keys(UserName=principal)['AccessKeyMetadata']
         for key in keys:
@@ -148,7 +138,6 @@ def _remediate_iam(event, principal, remediation):
     except iam.exceptions.NoSuchEntityException:
         remediation['actionsTaken'].append(f'NO_KEYS_FOUND for user {principal}')
 
-    # 2. Attach DenyAll policy to user
     try:
         iam.attach_user_policy(
             UserName=principal,
@@ -161,9 +150,6 @@ def _remediate_iam(event, principal, remediation):
 
 
 def _remediate_ec2(event, remediation):
-    """Move instance to quarantine security group."""
-
-    # Try to extract instance ID from CloudTrail responseElements
     response_elements = event.get('responseElements', {})
     instances_set = response_elements.get('instancesSet', {})
     items = instances_set.get('items', [])

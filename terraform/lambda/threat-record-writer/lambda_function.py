@@ -6,21 +6,22 @@ from decimal import Decimal
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 
 TABLE_NAME = "ThreatDetectionEvents"
-ALERT_THRESHOLD = 7  # Alert on threat scores >= 7
+ALERT_THRESHOLD = 7
 
 
 def lambda_handler(event, context):
-    """
-    Persists analyzed threat event to DynamoDB.
-    High-score events are emailed by the threat-email-alerter Step Functions task.
-    """
     table = dynamodb.Table(TABLE_NAME)
 
     analysis = event.get("analysis", {})
     threat_score = event.get("threatScore", 0)
 
-    # TTL: keep records for 90 days
     ttl_timestamp = int((datetime.now(timezone.utc) + timedelta(days=90)).timestamp())
+
+    remediation_result = (
+        event.get("remediationOutput", {})
+        .get("result", {})
+        .get("remediationResult", {})
+    )
 
     item = {
         "eventId": event.get("eventId", "unknown"),
@@ -38,10 +39,13 @@ def lambda_handler(event, context):
         "rawEvent": event.get("rawEvent", ""),
         "ingestedAt": event.get("ingestedAt", ""),
         "ttl": ttl_timestamp,
+        "remediationStatus": remediation_result.get("status", "NOT_TRIGGERED"),
+        "remediationActions": remediation_result.get("actionsTaken", []),
+        "remediationTime": remediation_result.get("remediationTime"),
+        "remediationError": remediation_result.get("error"),
     }
 
     table.put_item(Item=item)
-
 
     return {
         "statusCode": 200,
