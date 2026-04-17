@@ -1,20 +1,38 @@
-import json
+"""CloudWatch Logs subscription target: decode gzipped CloudTrail batches.
+
+Filter by event name, start Step Functions. Event names in HIGH_RISK_EVENTS
+must match terraform/lambda.tf local high_risk_event_filter_pattern.
+"""
 import base64
 import gzip
-import uuid
-import boto3
+import json
 import os
+import uuid
 from datetime import datetime, timezone
+
+import boto3
 
 sfn = boto3.client("stepfunctions")
 STATE_MACHINE_ARN = os.environ.get("STATE_MACHINE_ARN", "")
 
+# Same set as the subscription filter (lambda.tf); change both together.
 HIGH_RISK_EVENTS = {
-    "ConsoleLogin", "CreateUser", "DeleteUser", "AttachUserPolicy",
-    "PutUserPolicy", "CreateAccessKey", "DeleteTrail", "StopLogging",
-    "DeleteBucket", "PutBucketPolicy", "AuthorizeSecurityGroupIngress",
-    "CreateVpc", "RunInstances", "AssumeRoleWithWebIdentity",
-    "GetSecretValue", "DeleteSecret",
+    "ConsoleLogin",
+    "CreateUser",
+    "DeleteUser",
+    "AttachUserPolicy",
+    "PutUserPolicy",
+    "CreateAccessKey",
+    "DeleteTrail",
+    "StopLogging",
+    "DeleteBucket",
+    "PutBucketPolicy",
+    "AuthorizeSecurityGroupIngress",
+    "CreateVpc",
+    "RunInstances",
+    "AssumeRoleWithWebIdentity",
+    "GetSecretValue",
+    "DeleteSecret",
 }
 
 

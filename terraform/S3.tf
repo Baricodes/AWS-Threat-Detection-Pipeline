@@ -1,3 +1,4 @@
+# CloudTrail log bucket; bucket policy SourceArn must match trail name threat-detection-trail.
 resource "aws_s3_bucket" "cloudtrail_logs" {
   bucket = "threat-detection-cloudtrail-logs-us-east-1"
 }

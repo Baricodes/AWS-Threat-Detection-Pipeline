@@ -1,12 +1,17 @@
+"""Persist one analyzed event to DynamoDB.
+
+Reads optional remediationOutput from threat-remediator (critical path).
+"""
 import boto3
-import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 
 TABLE_NAME = "ThreatDetectionEvents"
+# Align with Step Functions CheckScoreForAlert and email alerter.
 ALERT_THRESHOLD = 7
+TTL_DAYS = 90
 
 
 def lambda_handler(event, context):
@@ -15,8 +20,11 @@ def lambda_handler(event, context):
     analysis = event.get("analysis", {})
     threat_score = event.get("threatScore", 0)
 
-    ttl_timestamp = int((datetime.now(timezone.utc) + timedelta(days=90)).timestamp())
+    ttl_timestamp = int(
+        (datetime.now(timezone.utc) + timedelta(days=TTL_DAYS)).timestamp()
+    )
 
+    # RemediateThreat: Lambda output → remediationOutput.result.remediationResult.
     remediation_result = (
         event.get("remediationOutput", {})
         .get("result", {})

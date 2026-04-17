@@ -1,3 +1,5 @@
+# CloudTrail → S3 archive + CloudWatch Logs; subscription filter on the log group drives the pipeline.
+
 data "aws_caller_identity" "current" {}
 
 resource "aws_iam_role" "cloudtrail_to_cloudwatch" {

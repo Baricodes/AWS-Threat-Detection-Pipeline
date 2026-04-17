@@ -1,3 +1,8 @@
+# -----------------------------------------------------------------------------
+# Lambdas: threat-log-enricher (CloudWatch trigger) → Step Functions; analyzer, writer, alerter, remediator.
+# Keep local.high_risk_event_filter_pattern in sync with lambda/threat-log-enricher HIGH_RISK_EVENTS.
+# -----------------------------------------------------------------------------
+
 data "archive_file" "threat_log_enricher" {
   type        = "zip"
   source_file = "${path.module}/lambda/threat-log-enricher/lambda_function.py"
@@ -56,6 +61,7 @@ resource "aws_lambda_permission" "threat_log_enricher_cloudwatch_logs" {
   source_arn    = "${aws_cloudwatch_log_group.cloudtrail_threat_detection.arn}:*"
 }
 
+# Invokes threat-log-enricher only for matching CloudTrail eventName values (reduces cost vs. all management events).
 resource "aws_cloudwatch_log_subscription_filter" "threat_log_enricher_high_risk" {
   name            = "high-risk-event-filter"
   log_group_name  = aws_cloudwatch_log_group.cloudtrail_threat_detection.name
@@ -177,6 +183,7 @@ resource "aws_iam_role" "threat_detection_lambda" {
   })
 }
 
+# Core pipeline permissions (Bedrock, DynamoDB, SES to verified identity, CloudWatch Logs).
 resource "aws_iam_role_policy" "threat_detection_lambda" {
   name = "ThreatDetectionLambdaPolicy"
   role = aws_iam_role.threat_detection_lambda.name
@@ -221,6 +228,7 @@ resource "aws_iam_role_policy" "threat_detection_lambda" {
   })
 }
 
+# threat-log-enricher: states:StartExecution on the pipeline state machine only.
 resource "aws_iam_role_policy" "threat_detection_sfn_start" {
   name = "ThreatDetectionSFNStartPolicy"
   role = aws_iam_role.threat_detection_lambda.name
@@ -238,6 +246,7 @@ resource "aws_iam_role_policy" "threat_detection_sfn_start" {
   })
 }
 
+# threat-remediator: IAM containment, EC2 quarantine, SES for remediation summary (broader than core SES policy).
 resource "aws_iam_role_policy" "threat_remediation" {
   name = "ThreatRemediationPolicy"
   role = aws_iam_role.threat_detection_lambda.name

@@ -1,3 +1,7 @@
+# -----------------------------------------------------------------------------
+# Step Functions: ThreatDetectionPipeline — Map over eventsToAnalyze, score branch ≥9 remediation / ≥7 alerts.
+# -----------------------------------------------------------------------------
+
 resource "aws_iam_role" "threat_detection_step_functions" {
   name = "ThreatDetectionStepFunctionsRole"
 
@@ -49,6 +53,7 @@ resource "aws_iam_role_policy" "threat_detection_step_functions" {
   })
 }
 
+# MergeAnalysis flattens Bedrock output to root for Choice on $.threatScore; remediation Catch falls through to WriteThreatRecord.
 resource "aws_sfn_state_machine" "threat_detection_pipeline" {
   name     = "ThreatDetectionPipeline"
   role_arn = aws_iam_role.threat_detection_step_functions.arn

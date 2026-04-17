@@ -1,25 +1,30 @@
-import boto3
+"""SES HTML/text alerts for scores ≥ 7.
+
+Uses verified identity as both Source and recipient (demo / sandbox-friendly).
+"""
 import os
+
+import boto3
 
 ses = boto3.client("ses", region_name="us-east-1")
 
-# Env: SES_EMAIL — populated by Terraform from var.ses_identity_email (verified SES address).
+# Terraform: var.ses_identity_email
 SES_EMAIL = (os.environ.get("SES_EMAIL") or "").strip()
 
 SEVERITY_COLORS = {
     "CRITICAL": "#FF0000",
-    "HIGH":     "#FF6600",
-    "MEDIUM":   "#FFA500",
-    "LOW":      "#008000",
-    "UNKNOWN":  "#808080",
+    "HIGH": "#FF6600",
+    "MEDIUM": "#FFA500",
+    "LOW": "#008000",
+    "UNKNOWN": "#808080",
 }
 
 SEVERITY_EMOJI = {
     "CRITICAL": "🚨",
-    "HIGH":     "⚠️",
-    "MEDIUM":   "🔔",
-    "LOW":      "ℹ️",
-    "UNKNOWN":  "❓",
+    "HIGH": "⚠️",
+    "MEDIUM": "🔔",
+    "LOW": "ℹ️",
+    "UNKNOWN": "❓",
 }
 
 
@@ -30,6 +35,9 @@ def build_html_email(event: dict, analysis: dict) -> str:
     threat_score = event.get("threatScore", 0)
     indicators = analysis.get("indicators", [])
     indicators_html = "".join(f"<li>{i}</li>" for i in indicators)
+    event_name = event.get("eventName", "Unknown Event")
+    event_time = event.get("eventTime", "")
+    aws_region = event.get("awsRegion", "")
 
     return f"""
 <!DOCTYPE html>
@@ -150,16 +158,20 @@ def build_html_email(event: dict, analysis: dict) -> str:
   <div class="container">
 
     <div class="header">
-      <h1>{emoji} Threat Detected — {event.get("eventName", "Unknown Event")}</h1>
-      <p>{event.get("eventTime", "")} &nbsp;|&nbsp; {event.get("awsRegion", "")}</p>
-      <div class="score-badge">Threat Score: {threat_score} / 10 &nbsp;·&nbsp; {severity}</div>
+      <h1>{emoji} Threat Detected — {event_name}</h1>
+      <p>{event_time} &nbsp;|&nbsp; {aws_region}</p>
+      <div class="score-badge">
+        Threat Score: {threat_score} / 10 &nbsp;·&nbsp; {severity}
+      </div>
     </div>
 
     <div class="body">
 
       <div class="section">
         <div class="section-title">Summary</div>
-        <div class="section-value">{analysis.get("summary", "No summary available.")}</div>
+        <div class="section-value">
+          {analysis.get("summary", "No summary available.")}
+        </div>
       </div>
 
       <div class="meta-grid">
@@ -183,7 +195,9 @@ def build_html_email(event: dict, analysis: dict) -> str:
 
       <div class="section">
         <div class="section-title">Reasoning</div>
-        <div class="section-value">{analysis.get("reasoning", "No reasoning provided.")}</div>
+        <div class="section-value">
+          {analysis.get("reasoning", "No reasoning provided.")}
+        </div>
       </div>
 
       <div class="section">
@@ -203,7 +217,8 @@ def build_html_email(event: dict, analysis: dict) -> str:
     </div>
 
     <div class="footer">
-      AI-Powered Threat Detection Pipeline &nbsp;·&nbsp; Amazon Bedrock + AWS Step Functions
+      AI-Powered Threat Detection Pipeline &nbsp;·&nbsp;
+      Amazon Bedrock + AWS Step Functions
     </div>
 
   </div>
@@ -217,6 +232,7 @@ def lambda_handler(event, context):
     analysis = event.get("analysis", {})
     severity = event.get("severity", "UNKNOWN")
 
+    # Step Functions only invokes when score ≥ 7; guard for direct tests.
     if threat_score < 7:
         return {
             "statusCode": 200,
@@ -225,7 +241,10 @@ def lambda_handler(event, context):
         }
 
     if not SES_EMAIL:
-        raise ValueError("SES_EMAIL must be set to the verified SES identity (from Terraform ses_identity_email).")
+        raise ValueError(
+            "SES_EMAIL must be set to the verified SES identity "
+            "(from Terraform ses_identity_email)."
+        )
 
     subject = (
         f"[{severity}] Threat Detected — "
